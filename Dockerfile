@@ -1,8 +1,10 @@
 # -----------------------------------------------------------------------------
 # Dockerfile — Nextcloud on Ubuntu 20.04 with Apache + PHP 7.4
-# FIX: Split the heredoc creation and a2(en|dis)site calls into separate RUN
-#      instructions to avoid Dockerfile parser treating post-EOF lines as
-#      new instructions ("unknown instruction: a2dissite").
+# FIX: Avoid build failure on Ubuntu 20.04 where 'php-smbclient' may be absent.
+#      - Remove 'php-smbclient' from the mandatory apt list
+#      - Try to install it if present (via apt-cache)
+#      - Optional PECL fallback controlled by INSTALL_SMBCLIENT_PECL=1
+# Also keeps prior fixes (heredoc & split RUN after heredoc).
 # -----------------------------------------------------------------------------
 
 ARG UBUNTU_VERSION=20.04
@@ -11,10 +13,13 @@ FROM ubuntu:${UBUNTU_VERSION}
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Build-time toggles
 # 1 = install ffmpeg + libreoffice for previews
 ARG INSTALL_PREVIEW=0
 # 1 = install APCu/Redis/Memcached PHP clients
 ARG INSTALL_MEMCACHES=1
+# 1 = build/install smbclient PHP extension via PECL if not in apt
+ARG INSTALL_SMBCLIENT_PECL=0
 # Nextcloud version to fetch
 ARG NEXTCLOUD_VERSION="28.0.10"
 
@@ -30,10 +35,23 @@ RUN set -eux \
        php7.4-bz2 php7.4-intl php7.4-gmp php7.4-bcmath \
        php7.4-ldap php7.4-imap php7.4-ftp php7.4-exif \
        php7.4-mysql php7.4-pgsql php7.4-sqlite3 \
-       php-imagick php-smbclient \
+       php-imagick \
+    # Try to install php-smbclient if available in this release; otherwise optionally build via PECL
+    && if apt-cache show php-smbclient >/dev/null 2>&1; then \
+         apt-get install -y --no-install-recommends php-smbclient; \
+       elif [ "${INSTALL_SMBCLIENT_PECL}" = "1" ]; then \
+         apt-get install -y --no-install-recommends php-pear php7.4-dev libsmbclient libzip-dev gcc make; \
+         printf "\n" | pecl install smbclient; \
+         echo "extension=smbclient.so" > /etc/php/7.4/mods-available/smbclient.ini; \
+         phpenmod smbclient; \
+       else \
+         echo "php-smbclient not available in apt (Ubuntu ${UBUNTU_VERSION}); skipping."; \
+       fi \
+    # Optional memcache clients
     && if [ "${INSTALL_MEMCACHES}" = "1" ]; then \
          apt-get install -y --no-install-recommends php-apcu php-redis php-memcached; \
        fi \
+    # Optional preview stack
     && if [ "${INSTALL_PREVIEW}" = "1" ]; then \
          apt-get install -y --no-install-recommends ffmpeg libreoffice; \
        fi \
@@ -66,7 +84,7 @@ RUN set -eux \
     && find /var/www/nextcloud -type f -exec chmod 640 {} \; \
     && rm -rf /tmp/build
 
-# ---- Apache vhost configuration (create file via heredoc) -------------------------
+# ---- Apache vhost configuration (heredoc) ----------------------------------------
 RUN set -eux; \
   cat >/etc/apache2/sites-available/nextcloud.conf <<'EOF'
 <VirtualHost *:80>
@@ -86,7 +104,7 @@ RUN set -eux; \
 </VirtualHost>
 EOF
 
-# ---- Enable vhost in a separate RUN to avoid parser issues -----------------------
+# Enable vhost in a separate RUN
 RUN set -eux \
     && a2dissite 000-default.conf \
     && a2ensite nextcloud.conf
@@ -117,11 +135,10 @@ ENTRYPOINT ["/usr/local/bin/bootstrap-nextcloud-apache-config.sh"]
 CMD ["/usr/sbin/apachectl", "-D", "FOREGROUND"]
 
 # -----------------------------------------------------------------------------
-# Build:
-#   docker build -t my-nextcloud:28-php74 .
-# Run:
-#   docker run -d --name nextcloud -p 8080:80 \
-#     -v $(pwd)/apache_config:/mnt/apache_config \
-#     -v nc_data:/var/www/nextcloud/data \
-#     my-nextcloud:28-php74
+# Build examples
+#   # default (skip smbclient if absent in apt)
+#   docker build -t nc_migrate:latest .
+#
+#   # force PECL build of smbclient if apt package is missing
+#   docker build -t nc_migrate:pecl --build-arg INSTALL_SMBCLIENT_PECL=1 .
 # -----------------------------------------------------------------------------
