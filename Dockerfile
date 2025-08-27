@@ -1,8 +1,11 @@
 # -----------------------------------------------------------------------------
 # Dockerfile — Nextcloud on Ubuntu 20.04 with Apache + PHP 7.4
-# (ENTRYPOINT: /usr/local/bin/bootstrap-nextcloud-apache-config.sh)
-# FIX: Corrected heredoc block for Apache vhost creation (no trailing backslashes
-#      on the heredoc terminator; use actual newlines instead of \n literals).
+# NOTES:
+#   • Fixed: Dockerfile parser error caused by inline comments after ARG.
+#     Dockerfiles do NOT support trailing inline comments; comments must be on
+#     their own line beginning with '#'.
+#   • Also keeps the corrected heredoc for vhost creation.
+#   • ENTRYPOINT runs /usr/local/bin/bootstrap-nextcloud-apache-config.sh
 # -----------------------------------------------------------------------------
 
 ARG UBUNTU_VERSION=20.04
@@ -11,8 +14,12 @@ FROM ubuntu:${UBUNTU_VERSION}
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
 
-ARG INSTALL_PREVIEW=0     # 1 = install ffmpeg + libreoffice for previews
-ARG INSTALL_MEMCACHES=1   # 1 = install APCu/Redis/Memcached PHP clients
+# Build-time toggles (place comments on separate lines — no inline comments)
+# 1 = install ffmpeg + libreoffice for previews
+ARG INSTALL_PREVIEW=0
+# 1 = install APCu/Redis/Memcached PHP clients
+ARG INSTALL_MEMCACHES=1
+# Nextcloud version to fetch
 ARG NEXTCLOUD_VERSION="28.0.10"
 
 # ---- OS + PHP + Apache + Modules --------------------------------------------------
@@ -63,7 +70,7 @@ RUN set -eux \
     && find /var/www/nextcloud -type f -exec chmod 640 {} \; \
     && rm -rf /tmp/build
 
-# ---- Apache vhost configuration (FIXED HEREDOC) ----------------------------------
+# ---- Apache vhost configuration (fixed heredoc) ----------------------------------
 RUN set -eux; \
   cat >/etc/apache2/sites-available/nextcloud.conf <<'EOF'
 <VirtualHost *:80>
