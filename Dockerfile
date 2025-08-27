@@ -1,11 +1,8 @@
 # -----------------------------------------------------------------------------
 # Dockerfile — Nextcloud on Ubuntu 20.04 with Apache + PHP 7.4
-# NOTES:
-#   • Fixed: Dockerfile parser error caused by inline comments after ARG.
-#     Dockerfiles do NOT support trailing inline comments; comments must be on
-#     their own line beginning with '#'.
-#   • Also keeps the corrected heredoc for vhost creation.
-#   • ENTRYPOINT runs /usr/local/bin/bootstrap-nextcloud-apache-config.sh
+# FIX: Split the heredoc creation and a2(en|dis)site calls into separate RUN
+#      instructions to avoid Dockerfile parser treating post-EOF lines as
+#      new instructions ("unknown instruction: a2dissite").
 # -----------------------------------------------------------------------------
 
 ARG UBUNTU_VERSION=20.04
@@ -14,7 +11,6 @@ FROM ubuntu:${UBUNTU_VERSION}
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Build-time toggles (place comments on separate lines — no inline comments)
 # 1 = install ffmpeg + libreoffice for previews
 ARG INSTALL_PREVIEW=0
 # 1 = install APCu/Redis/Memcached PHP clients
@@ -70,7 +66,7 @@ RUN set -eux \
     && find /var/www/nextcloud -type f -exec chmod 640 {} \; \
     && rm -rf /tmp/build
 
-# ---- Apache vhost configuration (fixed heredoc) ----------------------------------
+# ---- Apache vhost configuration (create file via heredoc) -------------------------
 RUN set -eux; \
   cat >/etc/apache2/sites-available/nextcloud.conf <<'EOF'
 <VirtualHost *:80>
@@ -89,8 +85,11 @@ RUN set -eux; \
   </Directory>
 </VirtualHost>
 EOF
-  a2dissite 000-default.conf; \
-  a2ensite nextcloud.conf
+
+# ---- Enable vhost in a separate RUN to avoid parser issues -----------------------
+RUN set -eux \
+    && a2dissite 000-default.conf \
+    && a2ensite nextcloud.conf
 
 # ---- PHP recommended runtime tweaks (optional) ------------------------------------
 RUN set -eux \
