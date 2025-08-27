@@ -1,7 +1,7 @@
 # -----------------------------------------------------------------------------
 # Dockerfile — Nextcloud on Ubuntu 20.04 with Apache + PHP 7.4
-# Purpose: Migration helper image (NO smbclient). Send Apache logs to STDOUT/STDERR
-#          so logs appear in the terminal when not running detached.
+# Purpose: Migration helper image (NO smbclient). Apache logs → STDOUT/ERR.
+#          Adds and configures `sudo` for maintenance commands.
 # -----------------------------------------------------------------------------
 
 ARG UBUNTU_VERSION=20.04
@@ -25,6 +25,7 @@ RUN set -eux \
        apache2 mariadb-client \
        ca-certificates curl wget gnupg tzdata \
        bzip2 unzip \
+       sudo \
        php7.4 libapache2-mod-php7.4 \
        php7.4-xml php7.4-zip php7.4-gd php7.4-mbstring php7.4-curl php7.4-opcache \
        php7.4-bz2 php7.4-intl php7.4-gmp php7.4-bcmath \
@@ -40,6 +41,18 @@ RUN set -eux \
          apt-get install -y --no-install-recommends ffmpeg libreoffice; \
        fi \
     && rm -rf /var/lib/apt/lists/*
+
+# ---- Configure sudo ---------------------------------------------------------------
+# Goals:
+#  - allow running typical maintenance like `sudo -u www-data php occ` cleanly
+#  - preserve PATH so php binaries resolve as expected
+#  - make www-data passwordless inside the container
+RUN set -eux \
+    && echo 'Defaults env_keep += "PATH"' > /etc/sudoers.d/container-path \
+    && echo 'Defaults:www-data !requiretty' > /etc/sudoers.d/www-data-tty \
+    && echo 'www-data ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/www-data-nopw \
+    && chmod 0440 /etc/sudoers.d/* \
+    && visudo -cf /etc/sudoers
 
 # ---- Apache modules ---------------------------------------------------------------
 RUN set -eux \
@@ -94,7 +107,6 @@ RUN set -eux \
     && a2ensite nextcloud.conf
 
 # ---- Pipe Apache logs to container STDOUT/STDERR ---------------------------------
-# This makes logs visible when running the container in foreground (no -d)
 RUN set -eux \
     && mkdir -p /var/log/apache2 \
     && for f in access.log error.log other_vhosts_access.log; do \
@@ -132,17 +144,11 @@ ENTRYPOINT ["/usr/local/bin/bootstrap-nextcloud-apache-config.sh"]
 CMD ["/usr/sbin/apachectl", "-D", "FOREGROUND"]
 
 # -----------------------------------------------------------------------------
-# Build examples
+# Build
 #   docker build -t nc_migrate:latest .
 #
-# Run attached (see logs in terminal):
-#   docker run --rm -p 8080:80 \
-#     -v $(pwd)/apache_config:/mnt/apache_config \
-#     -v nc_data:/var/www/nextcloud/data \
-#     nc_migrate:latest
-#
-# Run detached (logs still available via `docker logs -f <container>`):
-#   docker run -d --name nc_migrate -p 8080:80 \
+# Example usage (attached):
+#   docker run --rm -it -p 8080:80 \
 #     -v $(pwd)/apache_config:/mnt/apache_config \
 #     -v nc_data:/var/www/nextcloud/data \
 #     nc_migrate:latest
