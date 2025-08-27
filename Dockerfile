@@ -16,7 +16,7 @@ ARG INSTALL_PREVIEW=0
 # 1 = install APCu/Redis/Memcached PHP clients
 ARG INSTALL_MEMCACHES=1
 # Nextcloud version to fetch
-ARG NEXTCLOUD_VERSION="28.0.10"
+ARG NEXTCLOUD_VERSION="25.0.13"
 
 # ---- OS + PHP + Apache + Modules --------------------------------------------------
 RUN set -eux \
