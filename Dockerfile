@@ -1,6 +1,7 @@
 # -----------------------------------------------------------------------------
 # Dockerfile — Nextcloud on Ubuntu 20.04 with Apache + PHP 7.4
-# Purpose: Migration helper image (NO smbclient). All php-smbclient logic removed.
+# Purpose: Migration helper image (NO smbclient). Send Apache logs to STDOUT/STDERR
+#          so logs appear in the terminal when not running detached.
 # -----------------------------------------------------------------------------
 
 ARG UBUNTU_VERSION=20.04
@@ -92,6 +93,19 @@ RUN set -eux \
     && a2dissite 000-default.conf \
     && a2ensite nextcloud.conf
 
+# ---- Pipe Apache logs to container STDOUT/STDERR ---------------------------------
+# This makes logs visible when running the container in foreground (no -d)
+RUN set -eux \
+    && mkdir -p /var/log/apache2 \
+    && for f in access.log error.log other_vhosts_access.log; do \
+         if [ -e "/var/log/apache2/$f" ] && [ ! -L "/var/log/apache2/$f" ]; then \
+           : > "/var/log/apache2/$f"; \
+         fi; \
+       done \
+    && ln -sfT /proc/self/fd/1 /var/log/apache2/access.log \
+    && ln -sfT /proc/self/fd/2 /var/log/apache2/error.log \
+    && ln -sfT /proc/self/fd/1 /var/log/apache2/other_vhosts_access.log
+
 # ---- PHP recommended runtime tweaks (optional) ------------------------------------
 RUN set -eux \
     && PHP_INI_DIR="/etc/php/7.4/apache2" \
@@ -120,5 +134,16 @@ CMD ["/usr/sbin/apachectl", "-D", "FOREGROUND"]
 # -----------------------------------------------------------------------------
 # Build examples
 #   docker build -t nc_migrate:latest .
-#   docker build -t nc_migrate:slim --build-arg INSTALL_MEMCACHES=0 .
+#
+# Run attached (see logs in terminal):
+#   docker run --rm -p 8080:80 \
+#     -v $(pwd)/apache_config:/mnt/apache_config \
+#     -v nc_data:/var/www/nextcloud/data \
+#     nc_migrate:latest
+#
+# Run detached (logs still available via `docker logs -f <container>`):
+#   docker run -d --name nc_migrate -p 8080:80 \
+#     -v $(pwd)/apache_config:/mnt/apache_config \
+#     -v nc_data:/var/www/nextcloud/data \
+#     nc_migrate:latest
 # -----------------------------------------------------------------------------
